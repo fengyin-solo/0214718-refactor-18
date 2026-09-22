@@ -277,10 +277,11 @@ export default {
       return taskStore.getAll()
     },
     pendingTasks() {
-      return this.allTasks.filter(task => task.status !== 'completed' && task.status !== 'cancelled')
+      // 所有状态共用 taskStore 的统一分组规则，视图不再维护状态分支
+      return this.allTasks.filter(task => taskStore.STATUS_GROUPS[task.status] === 'pending')
     },
     completedTasks() {
-      return this.allTasks.filter(task => task.status === 'completed')
+      return this.allTasks.filter(task => taskStore.STATUS_GROUPS[task.status] === 'completed')
     },
     pendingCount() {
       return this.pendingTasks.length
@@ -325,45 +326,37 @@ export default {
     },
     handleAction(task, action) {
       this.selectedTask = { ...task }
-      
+
+      // 带路由的动作（付款、再次预约/购买、赛程/物流等查看类跳转）统一走跳转规则
       if (action.route) {
-        this.navigateToRoute(action.route, action.key, task)
+        this.navigateToRoute(task, action.key)
         return
       }
-      
+
+      // 无路由的动作按 key 分发；新增状态时只需在注册表配置动作，无需在此扩充分支
       const actionMap = {
         pay: () => this.openPayModal(),
         cancel: () => this.openCancelModal(),
         view: () => this.openDetailModal(),
         remind: () => this.handleRemind(),
-        rebook: () => this.navigateToRoute('/tables', 'rebook', task),
-        rebuy: () => this.navigateToRoute('/shop', 'rebuy', task),
         confirm: () => this.handleConfirm(),
         review: () => this.handleReview()
       }
       const handler = actionMap[action.key]
       if (handler) handler()
     },
-    navigateToRoute(route, actionKey, task) {
-      logger.info('Navigate to business page', { route, actionKey, taskId: task.id, type: task.type })
-      
-      const query = {}
-      if (task.extra) {
-        if (task.type === 'booking' && task.extra.tableId) {
-          query.tableId = task.extra.tableId
-        }
-        if (task.type === 'course' && task.extra.courseId) {
-          query.courseId = task.extra.courseId
-        }
-        if (task.type === 'competition' && task.extra.competitionId) {
-          query.competitionId = task.extra.competitionId
-        }
-        if (task.type === 'order' && task.extra.orderNo) {
-          query.orderNo = task.extra.orderNo
-        }
-      }
-      
-      this.$router.push({ path: route, query })
+    navigateToRoute(task, actionKey) {
+      // 路由与 query 由 taskStore 按类型规则统一生成
+      const navigation = taskStore.getNavigationFor(task)
+      if (!navigation) return
+
+      logger.info('Navigate to business page', {
+        route: navigation.path,
+        actionKey,
+        taskId: task.id,
+        type: task.type
+      })
+      this.$router.push(navigation)
     },
     openPayModal() {
       this.showPayModal = true
@@ -398,15 +391,16 @@ export default {
     async confirmCancel() {
       if (!this.selectedTask) return
       this.cancelLoading = true
-      
+
       await new Promise(resolve => setTimeout(resolve, 800))
-      
-      const result = taskStore.remove(this.selectedTask.id)
-      
+
+      // 取消走统一状态迁移：待处理状态 -> 已取消，结果与原先从列表移除一致
+      const updatedTask = taskStore.cancel(this.selectedTask.id)
+
       this.cancelLoading = false
       this.showCancelModal = false
-      
-      if (result) {
+
+      if (updatedTask) {
         this.refreshTasks()
         this.showNotification('success', '取消成功', '任务已取消')
         logger.info('Task cancelled', { taskId: this.selectedTask.id })
@@ -421,10 +415,13 @@ export default {
     },
     handleConfirm() {
       if (!this.selectedTask) return
-      const result = taskStore.updateStatus(this.selectedTask.id, 'completed')
+      // 确认收货走统一状态迁移：已发货 -> 已完成
+      const result = taskStore.transition(this.selectedTask.id, 'confirm')
       if (result) {
         this.refreshTasks()
         this.showNotification('success', '确认收货成功', '感谢您的购买')
+      } else {
+        this.showNotification('error', '操作失败', '请稍后重试')
       }
     },
     handleReview() {

@@ -283,8 +283,8 @@ function handleUserTasks(options) {
       const result = taskStore.markAsPaid(taskId)
       return { success: !!result, message: result ? '支付成功' : '支付失败' }
     } else if (action === 'cancel') {
-      const result = taskStore.remove(taskId)
-      return { success: result, message: result ? '取消成功' : '取消失败' }
+      const result = taskStore.cancel(taskId)
+      return { success: !!result, message: result ? '取消成功' : '取消失败' }
     }
     
     return { success: true, message: '操作成功' }
